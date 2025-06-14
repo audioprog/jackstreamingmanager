@@ -1,0 +1,185 @@
+import { Button, TabWidget, TextEdit, ListView, StandardListView, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export component MainWindow {
+    in-out property <string> output;
+
+    in-out property <[StandardListViewItem]> jack_sources;
+    in-out property <int> jack_selected;
+    callback jack_source_clicked(int);
+
+    in-out property <[StandardListViewItem]> autio_programs;
+    in-out property <int> program_selected;
+    callback program_selectiion_changed(int);
+
+    in-out property <string> edit_program_name;
+    callback program_name_changed();
+    in-out property <string> edit_command_name;
+    callback command_name_changed();
+    in-out property <string> edit_start_params;
+    callback start_params_changed();
+
+    in-out property <[StandardListViewItem]> jack_connections;
+    in-out property <int> Jack_connection_selected;
+    callback jack_connection_changed(int);
+    callback jack_connection_add();
+
+    in-out property <string> jack_source;
+    callback jack_source_changed();
+    in-out property <string> jack_target;
+    callback jack_target_changed();
+    in-out property <string> jack_search;
+    callback jack_search_changed();
+
+    callback jack_connection_remove();
+
+    in-out property <[StandardListViewItem]> jack_targets;
+    in-out property <int> jack_target_selected;
+    callback jack_target_clicked(int);
+    callback jack_target_reinit();
+
+    callback save_settings();
+    callback add_program();
+
+    TabWidget {
+        vertical-stretch: 1;
+        Tab {
+            title: "Programm";
+
+            VerticalLayout {
+
+
+                Text {
+                    text: root.output;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        Tab {
+            title: "Einstellungen";
+
+            VerticalLayout {
+                HorizontalLayout {
+        
+                    StandardListView {
+                        min-height: 200px;
+                        model: root.jack_sources;
+                        current-item <=> root.jack_selected;
+                        item-pointer-event => {
+                            root.jack_source_clicked(self.current-item);
+                        }
+                    }
+        
+                    StandardListView {
+                        model: root.autio_programs;
+                        current-item <=> root.program_selected;
+                        current-item-changed => { root.program_selectiion_changed(self.current-item); }
+                    }
+
+
+                    VerticalLayout {
+
+                        TextEdit {
+                            text <=> root.edit_program_name;
+                            placeholder-text: "Programmname";
+                            edited => { root.program_name_changed(); }
+                        }
+                        TextEdit {
+                            text <=> root.edit_command_name;
+                            placeholder-text: "Kommando";
+                            edited(text) => { root.command_name_changed(); }
+                        }
+                        TextEdit {
+                            text <=> root.edit_start_params;
+                            placeholder-text: "Startparameter (mit Leerzeichen getrennt)";
+                            edited(text) => { root.start_params_changed(); }
+                        }
+                        StandardListView {
+                            model: root.jack_connections;
+                            current-item <=> root.Jack_connection_selected;
+                            current-item-changed => { root.jack_connection_changed(self.current-item); }
+                        }
+                        VerticalBox {
+                            HorizontalBox {
+                                VerticalBox {
+                                    Button {
+                                        text: ">";
+                                        clicked => {
+                                            root.jack_source = root.jack_sources[root.jack_selected].text;
+                                            root.jack_source_changed();
+                                        }
+                                    }
+                                }
+                                TextEdit {
+                                    text <=> root.jack_source;
+                                    placeholder-text: "Quelle";
+                                    edited(text) => { root.jack_source_changed(); }
+                                }
+                            }
+                            HorizontalBox {
+                                TextEdit {
+                                    text <=> root.jack_target;
+                                    placeholder-text: "Ziel";
+                                    edited(text) => { root.jack_target_changed(); }
+                                }
+                                VerticalBox {
+                                    Button {
+                                        text: "<";
+                                        clicked => {
+                                            root.jack_target = root.jack_targets[root.jack_target_selected].text;
+                                            root.jack_target_changed();
+                                        }
+                                    }
+                                }
+                            }
+                            TextEdit {
+                                text <=> root.jack_search;
+                                placeholder-text: "Suche";
+                                edited(text) => { root.jack_search_changed(); }
+                            }
+                            Button {
+                                text: "Entfernen";
+                                horizontal-stretch: 1;
+                                clicked => { root.jack_connection_remove(); }
+                            }
+                        }
+                        Button {
+                            horizontal-stretch: 1;
+                            text: "Hinzufügen";
+                            clicked => { root.jack_connection_add(); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        StandardListView {
+                            min-height: 200px;
+                            model: root.jack_targets;
+                            current-item <=> root.jack_target_selected;
+                            item-pointer-event => {
+                                root.jack_target_clicked(self.current-item);
+                            }
+                        }
+                        Button {
+                            text: "Aktualisieren";
+                            horizontal-stretch: 1;
+                            clicked => { root.jack_target_reinit(); }
+                        }
+                    }
+                }
+        
+                HorizontalBox {
+                    height: 40px;
+                    horizontal-stretch: 0;
+                    Button {
+                        text: "Neu";
+                        clicked => { root.add_program(); }
+                    }
+                    Button {
+                        text: "Speichern";
+                        clicked => { root.save_settings(); }
+                    }
+                }
+            }
+        }
+    }
+}
