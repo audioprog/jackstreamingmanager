@@ -1,9 +1,11 @@
-import { Button, TabWidget, TextEdit, ListView, StandardListView, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button, TabWidget, TextEdit, ListView, StandardListView, VerticalBox, HorizontalBox, ScrollView, ComboBox } from "std-widgets.slint";
 
-export component MainWindow {
+export component MainWindow inherits Window  {
+    in property <[string]> use_cases;
+    callback start_use_case(string);
     in-out property <string> output;
 
-    in-out property <[StandardListViewItem]> jack_sources;
+    in-out property <[string]> jack_sources;
     in-out property <int> jack_selected;
     callback jack_source_clicked(int);
 
@@ -17,28 +19,36 @@ export component MainWindow {
     callback command_name_changed();
     in-out property <string> edit_start_params;
     callback start_params_changed();
+    callback start_app();
 
     in-out property <[StandardListViewItem]> jack_connections;
     in-out property <int> Jack_connection_selected;
     callback jack_connection_changed(int);
     callback jack_connection_add();
 
+    in-out property <[string]> jack_filters;
+    in-out property <string> jack_filter;
+    callback jack_filter_changed();
     in-out property <string> jack_source;
     callback jack_source_changed();
     in-out property <string> jack_target;
     callback jack_target_changed();
     in-out property <string> jack_search;
     callback jack_search_changed();
+    callback jack_connect();
 
     callback jack_connection_remove();
 
-    in-out property <[StandardListViewItem]> jack_targets;
+    in-out property <[string]> jack_targets;
     in-out property <int> jack_target_selected;
     callback jack_target_clicked(int);
     callback jack_target_reinit();
 
     callback save_settings();
     callback add_program();
+    callback remove_program();
+
+    title: "Audio-Programmsteuerung";
 
     TabWidget {
         vertical-stretch: 1;
@@ -47,6 +57,14 @@ export component MainWindow {
 
             VerticalLayout {
 
+                for use_case in use_cases : Button {
+                    text: use-case;
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.output = "Starte " + use-case;
+                        root.start_use_case(use-case);
+                    }
+                }
 
                 Text {
                     text: root.output;
@@ -60,15 +78,6 @@ export component MainWindow {
 
             VerticalLayout {
                 HorizontalLayout {
-        
-                    StandardListView {
-                        min-height: 200px;
-                        model: root.jack_sources;
-                        current-item <=> root.jack_selected;
-                        item-pointer-event => {
-                            root.jack_source_clicked(self.current-item);
-                        }
-                    }
         
                     StandardListView {
                         model: root.autio_programs;
@@ -94,18 +103,65 @@ export component MainWindow {
                             placeholder-text: "Startparameter (mit Leerzeichen getrennt)";
                             edited(text) => { root.start_params_changed(); }
                         }
+                        Button {
+                            text: "Starten";
+                            horizontal-stretch: 1;
+                            clicked => { root.start_app(); }
+                        }
                         StandardListView {
                             model: root.jack_connections;
                             current-item <=> root.Jack_connection_selected;
                             current-item-changed => { root.jack_connection_changed(self.current-item); }
                         }
+
+                        HorizontalBox {
+                            Button {
+                                text: "Hinzufügen";
+                                horizontal-stretch: 1;
+                                clicked => { root.jack_connection_add(); }
+                            }
+                            Button {
+                                text: "Entfernen";
+                                horizontal-stretch: 1;
+                                clicked => { root.jack_connection_remove(); }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 1px;
+                            background: #000;
+                            horizontal-stretch: 1;
+                        }
+
                         VerticalBox {
+
+                            ComboBox {
+                                model: root.jack_filters;
+                                selected => {
+                                    root.jack_filter = self.current-value;
+                                    root.jack_filter_changed();
+                                }
+                            }
+                            TextEdit {
+                                text <=> root.jack_filter;
+                                placeholder-text: "Filter";
+                                edited(text) => { root.jack_filter_changed(); }
+                            }
+                            
+                            ComboBox {
+                                model: root.jack_sources;
+                                current-index <=> root.jack_selected;
+                                selected => {
+                                    root.jack_source_clicked(self.current-index);
+                                }
+                            }
+
                             HorizontalBox {
                                 VerticalBox {
                                     Button {
                                         text: ">";
                                         clicked => {
-                                            root.jack_source = root.jack_sources[root.jack_selected].text;
+                                            root.jack_source = root.jack_sources[root.jack_selected];
                                             root.jack_source_changed();
                                         }
                                     }
@@ -115,54 +171,45 @@ export component MainWindow {
                                     placeholder-text: "Quelle";
                                     edited(text) => { root.jack_source_changed(); }
                                 }
+                                
+                            }
+                            
+
+                            ComboBox {
+                                model: root.jack_targets;
+                                current-index <=> root.jack_target_selected;
+                                selected => {
+                                    root.jack_target_clicked(self.current-index);
+                                }
                             }
                             HorizontalBox {
+                                VerticalBox {
+                                    Button {
+                                        text: ">";
+                                        clicked => {
+                                            root.jack_target = root.jack_targets[root.jack_target_selected];
+                                            root.jack_target_changed();
+                                        }
+                                    }
+                                }
                                 TextEdit {
                                     text <=> root.jack_target;
                                     placeholder-text: "Ziel";
                                     edited(text) => { root.jack_target_changed(); }
                                 }
-                                VerticalBox {
-                                    Button {
-                                        text: "<";
-                                        clicked => {
-                                            root.jack_target = root.jack_targets[root.jack_target_selected].text;
-                                            root.jack_target_changed();
-                                        }
-                                    }
-                                }
+
                             }
                             TextEdit {
                                 text <=> root.jack_search;
                                 placeholder-text: "Suche";
                                 edited(text) => { root.jack_search_changed(); }
                             }
-                            Button {
-                                text: "Entfernen";
-                                horizontal-stretch: 1;
-                                clicked => { root.jack_connection_remove(); }
-                            }
-                        }
-                        Button {
-                            horizontal-stretch: 1;
-                            text: "Hinzufügen";
-                            clicked => { root.jack_connection_add(); }
-                        }
-                    }
 
-                    VerticalLayout {
-                        StandardListView {
-                            min-height: 200px;
-                            model: root.jack_targets;
-                            current-item <=> root.jack_target_selected;
-                            item-pointer-event => {
-                                root.jack_target_clicked(self.current-item);
+                            Button {
+                                text: "Verbinden";
+                                horizontal-stretch: 1;
+                                clicked => { root.jack_connect(); }
                             }
-                        }
-                        Button {
-                            text: "Aktualisieren";
-                            horizontal-stretch: 1;
-                            clicked => { root.jack_target_reinit(); }
                         }
                     }
                 }
@@ -173,6 +220,14 @@ export component MainWindow {
                     Button {
                         text: "Neu";
                         clicked => { root.add_program(); }
+                    }
+                    Button {
+                        text: "Löschen";
+                        clicked => { root.remove_program(); }
+                    }
+                    Button {
+                        text: "Audiogeräte aktualisieren";
+                        clicked => { root.jack_target_reinit(); }
                     }
                     Button {
                         text: "Speichern";
