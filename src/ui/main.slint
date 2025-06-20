@@ -91,15 +91,21 @@ export component MainWindow inherits Window  {
 
             VerticalLayout {
                 HorizontalLayout {
-        
-                    StandardListView {
-                        model: root.autio_programs;
-                        current-item <=> root.program_selected;
-                        current-item-changed => { root.program_selectiion_changed(self.current-item); }
-                    }
-
 
                     VerticalLayout {
+                        
+                        StandardListView {
+                            model: root.autio_programs;
+                            current-item <=> root.program_selected;
+                            current-item-changed => { root.program_selectiion_changed(self.current-item); }
+                        }
+
+                        // Trenner
+                        Rectangle {
+                            height: 1px;
+                            background: #000;
+                            horizontal-stretch: 1;
+                        }
 
                         TextEdit {
                             text <=> root.edit_program_name;
@@ -140,12 +146,10 @@ export component MainWindow inherits Window  {
                             }
                         }
 
-                        // Trenner
-                        Rectangle {
-                            height: 1px;
-                            background: #000;
-                            horizontal-stretch: 1;
-                        }
+                    }
+
+
+                    VerticalLayout {
 
                         VerticalBox {
 
