@@ -483,11 +483,6 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
-
-                        // Setze die Eingabefelder zurück
-                        ui.set_Jack_connection_selected(0);
-
-                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -514,11 +509,6 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
-
-                        // Setze die Eingabefelder zurück
-                        ui.set_Jack_connection_selected(0);
-
-                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -545,11 +535,6 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
-
-                        // Setze die Eingabefelder zurück
-                        ui.set_Jack_connection_selected(0);
-
-                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
