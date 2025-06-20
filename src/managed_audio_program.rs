@@ -32,25 +32,34 @@ impl ManagedAudioProgram {
             .join(".jackstreamingmanager")
     }
     /// Lädt alle vorhandenen Konfigurationen aus dem Konfigurationsverzeichnis.
-    pub fn load_all() -> Vec<Self> {
+    pub fn load_all() -> (Vec<Self>, Vec<String>) {
         let mut programs = Vec::new();
+        let mut errors = Vec::new();
         let config_dir = Self::config_dir();
         if let Ok(entries) = fs::read_dir(&config_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     let program_name = path.file_name().unwrap().to_string_lossy().to_string();
-                    if let Some(prog) = Self::new(&program_name) {
-                        // pid_file beim Laden setzen
-                        let mut prog = prog;
-                        prog.pid_file = ManagedAudioProgram::pid_path(&program_name);
-                        prog.jack_node_name = fs::read_to_string(path.join("jack_target")).unwrap_or_default();
-                        programs.push(prog);
+                    match Self::new(&program_name) {
+                        Some(mut prog) => {
+                            prog.pid_file = ManagedAudioProgram::pid_path(&program_name);
+                            prog.jack_node_name = fs::read_to_string(path.join("jack_target")).unwrap_or_default();
+                            if let Err(e) = prog.remove_dead_pids() {
+                                errors.extend(e);
+                            }
+                            programs.push(prog);
+                        }
+                        None => {
+                            errors.push(format!("Fehler beim Laden der Konfiguration für '{}'", program_name));
+                        }
                     }
                 }
             }
+        } else {
+            errors.push(format!("Fehler beim Lesen des Konfigurationsverzeichnisses: {:?}", config_dir));
         }
-        programs
+        (programs, errors)
     }
 
     /// Lädt die Einstellungen aus der Konfigurationsdatei und gibt eine neue Instanz zurück.
@@ -140,6 +149,42 @@ impl ManagedAudioProgram {
                 }
             }
             Err(e) => errors.push(format!("Fehler beim Erstellen der Datei: {}", e)),
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn remove_dead_pids(&mut self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if self.pid_file.exists() {
+            match fs::read_to_string(&self.pid_file) {
+                Ok(pid_str) => {
+                    match pid_str.trim().parse::<u32>() {
+                        Ok(pid) => {
+                            let mut sys = System::new();
+                            sys.refresh_processes_specifics(
+                                ProcessesToUpdate::All,
+                                true,
+                                ProcessRefreshKind::nothing()
+                                    .with_cmd(UpdateKind::OnlyIfNotSet)
+                                    .with_exe(UpdateKind::OnlyIfNotSet),
+                            );
+                            if sys.process(sysinfo::Pid::from(pid as usize)).is_none() {
+                                if let Err(e) = fs::remove_file(&self.pid_file) {
+                                    errors.push(format!("Fehler beim Entfernen der PID-Datei: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => errors.push(format!("Fehler beim Parsen der PID: {}", e)),
+                    }
+                }
+                Err(e) => errors.push(format!("Fehler beim Lesen der PID-Datei: {}", e)),
+            }
+        } else {
+            errors.push("PID-Datei existiert nicht.".to_string());
         }
         if errors.is_empty() {
             Ok(())

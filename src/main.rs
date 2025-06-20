@@ -1,6 +1,6 @@
 slint::include_modules!();
 
-use std::{path::PathBuf, process::Command, sync::{Arc, Mutex, MutexGuard}};
+use std::{path::PathBuf, process::Command, sync::{Arc, Mutex, MutexGuard}, vec};
 
 use slint::{StandardListViewItem, VecModel, ModelRc, SharedString};
 
@@ -16,11 +16,13 @@ fn main() {
     // Ports beim Start einlesen
     let ports = read_jack_ports();
 
+    let mut start_errors: Vec<String> = Vec::new();
+
     // Programme verwalten
     // Hier alle vorhandenen Konfigurationen laden
-    let audio_programs: Arc<Mutex<Vec<ManagedAudioProgram>>> = Arc::new(Mutex::new(
-        ManagedAudioProgram::load_all()
-    ));
+    let result = ManagedAudioProgram::load_all();
+    start_errors.extend(result.1);
+    let audio_programs: Arc<Mutex<Vec<ManagedAudioProgram>>> = Arc::new(Mutex::new(result.0));
 
     // Beispiel: Programm hinzufügen und starten
     // Nur Beispiel hinzufügen, wenn keine Programme geladen wurden
@@ -663,6 +665,7 @@ fn main() {
         });
     }
 
+    ui.set_output(start_errors.join("\n").into());
     ui.run().unwrap();
 }
 
