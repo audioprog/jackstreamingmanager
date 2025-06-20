@@ -851,7 +851,7 @@ fn get_jack_name(ports: &Vec<managed_audio_program::JackPortInfo>, apps_jack_nod
     } else if port.target_name.contains('*') {
         let matching_targets = ports.iter().filter(|p| {
             let pattern = port.target_name.clone();
-            let re = regex::Regex::new(&format!("^{}$", pattern)).unwrap();
+            let re = regex::Regex::new(&format!("^{}$", pattern.replace("*", ".*"))).unwrap();
             re.is_match(&p.name)
         }).collect::<Vec<_>>();
         if !matching_targets.is_empty() {
