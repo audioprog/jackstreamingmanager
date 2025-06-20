@@ -44,7 +44,7 @@ fn main() {
             pid_file: PathBuf::new(),
             jack_node_name: "".to_string(),
         };
-        prog.save_config();
+        let _ = prog.save_config();
 
         audio_programs.lock().unwrap().push(prog);
     }
@@ -169,12 +169,19 @@ fn main() {
 
     {
         let audio_programs = audio_programs.clone();
+        let ui_handle = ui.as_weak();
         ui.on_start_use_case(move |use_case| {
             let mut programs = audio_programs.lock().unwrap();
             // Collect indices to connect after mutable borrow ends
             let mut to_connect = Vec::new();
             for (app_index, prog) in programs.iter_mut().enumerate() {
-                prog.start();
+                let result = prog.start();
+                if let Some(ui) = ui_handle.upgrade() {
+                    if let Err(e) = result {
+                        ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                    }
+                }
+
                 for (jack_index, port) in prog.config.jack_ports.iter().enumerate() {
                     if port.filter == use_case.to_string() {
                         to_connect.push((app_index as i32, jack_index as i32));
@@ -184,10 +191,20 @@ fn main() {
             // Drop the mutable borrow before calling connect_jack_ports
             drop(programs);
             let mut programs = audio_programs.lock().unwrap();
-            for (app_index, jack_index) in to_connect {
-                connect_jack_ports(&mut programs, app_index, jack_index);
+            let mut all_errors = Vec::new();
+            for (app_index, jack_index) in &to_connect {
+                if let Err(errors) = connect_jack_ports(&mut programs, *app_index, *jack_index) {
+                    all_errors.extend(errors);
+                }
             }
-            disconnect_unwanted_jack_ports(programs, &use_case);
+            if let Err(errors) = disconnect_unwanted_jack_ports(programs, &use_case) {
+                all_errors.extend(errors);
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                if !all_errors.is_empty() {
+                    ui.set_output(all_errors.join("\n").into());
+                }
+            }
         });
     }
 
@@ -195,10 +212,15 @@ fn main() {
         let audio_programs = audio_programs.clone();
         let ui_handle = ui.as_weak();
         ui.on_remove_unwanted_connections(move || {
+            let mut all_errors = Vec::new();
             if let Ok(programs) = audio_programs.lock() {
-                disconnect_unwanted_jack_ports(programs, &"");
+                if let Err(errors) = disconnect_unwanted_jack_ports(programs, &"") {
+                    all_errors.extend(errors);
+                }
             }
             if let Some(ui) = ui_handle.upgrade() {
+                ui.set_output(all_errors.join("\n").into());
+                
                 let filters = get_filters(audio_programs.lock().unwrap());
                 ui.set_use_cases(
                     ModelRc::new(VecModel::from(
@@ -350,7 +372,12 @@ fn main() {
             let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
             let mut programs = audio_programs.lock().unwrap();
             if let Some(prog) = programs.get_mut(idx) {
-                prog.start();
+                let result = prog.start();
+                if let Some(ui) = ui_handle.upgrade() {
+                    if let Err(e) = result {
+                        ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                    }
+                }
             }
         });
     }
@@ -402,7 +429,12 @@ fn main() {
             let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
             let mut programs = audio_programs.lock().unwrap();
             if let Some(prog) = programs.get_mut(idx) {
-                prog.save_config();
+                let result = prog.save_config();
+                if let Some(ui) = ui_handle.upgrade() {
+                    if let Err(e) = result {
+                        ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                    }
+                }
             }
 
             if let Some(ui) = ui_handle.upgrade() {
@@ -435,7 +467,12 @@ fn main() {
                     target_search_name: target_name.clone(),
                     target_name,
                 });
-                prog.save_config();
+                let result = prog.save_config();
+                if let Some(ui) = ui_handle.upgrade() {
+                    if let Err(e) = result {
+                        ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                    }
+                }
                 // Aktualisiere die Verbindungen im UI
                 let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
                     .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
@@ -476,7 +513,10 @@ fn main() {
                     if let Some(port) = prog.config.jack_ports.get_mut(connection_idx) {
                         let source_name = ui.get_jack_source().to_string();
                         port.source_name = source_name;
-                        prog.save_config();
+                        let result = prog.save_config();
+                        if let Err(e) = result {
+                            ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                        }
 
                         // Aktualisiere die Verbindungen im UI
                         let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
@@ -502,7 +542,10 @@ fn main() {
                     if let Some(port) = prog.config.jack_ports.get_mut(connection_idx) {
                         let target_name = ui.get_jack_target().to_string();
                         port.target_name = target_name;
-                        prog.save_config();
+                        let result = prog.save_config();
+                        if let Err(e) = result {
+                            ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                        }
 
                         // Aktualisiere die Verbindungen im UI
                         let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
@@ -528,7 +571,10 @@ fn main() {
                     if let Some(port) = prog.config.jack_ports.get_mut(connection_idx) {
                         let target_search_name = ui.get_jack_search().to_string();
                         port.target_search_name = target_search_name;
-                        prog.save_config();
+                        let result = prog.save_config();
+                        if let Err(e) = result {
+                            ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                        }
 
                         // Aktualisiere die Verbindungen im UI
                         let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
@@ -554,7 +600,11 @@ fn main() {
                     let selected_index = ui.get_Jack_connection_selected() as usize;
                     if selected_index < prog.config.jack_ports.len() {
                         prog.config.jack_ports.remove(selected_index);
-                        prog.save_config();
+                        let result = prog.save_config();
+                        if let Err(e) = result {
+                            ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
+                        }
+
                         // Aktualisiere die Verbindungen im UI
                         let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
@@ -582,7 +632,10 @@ fn main() {
                 let idx = ui.get_program_selected();
                 let mut programs = audio_programs.lock().unwrap();
                 let jack_index = ui.get_jack_selected();
-                connect_jack_ports(&mut programs, jack_index, idx);
+                if let Err(errors) = connect_jack_ports(&mut programs, jack_index, idx) {
+                    let error_message = errors.join("\n");
+                    ui.set_output(error_message.into());
+                }
             }
         });
     }
@@ -661,7 +714,10 @@ fn get_filters(programs: MutexGuard<'_, Vec<ManagedAudioProgram>>) -> Vec<String
 }
 
 
-pub fn disconnect_unwanted_jack_ports(apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, use_case: &str) -> () {
+pub fn disconnect_unwanted_jack_ports(
+    apps: MutexGuard<'_, Vec<ManagedAudioProgram>>,
+    use_case: &str,
+) -> Result<(), Vec<String>> {
     let ports = read_jack_ports();
     let connections = read_jack_connections();
 
@@ -670,11 +726,14 @@ pub fn disconnect_unwanted_jack_ports(apps: MutexGuard<'_, Vec<ManagedAudioProgr
     let wanted_connections: HashSet<(String, String)> = apps.iter()
         .flat_map(|app| {
             app.config.jack_ports
-            .iter()
-            .filter(|port| port.filter.split_whitespace().any(|f| f == use_case) || port.filter.is_empty())
-            .map(|port| (port.source_name.clone(), get_jack_name(&ports, &apps_jack_node_names, app.jack_node_name.clone(), port)))
+                .iter()
+                .filter(|port| port.filter.split_whitespace().any(|f| f == use_case) || port.filter.is_empty())
+                .map(|port| (port.source_name.clone(), get_jack_name(&ports, &apps_jack_node_names, app.jack_node_name.clone(), port)))
         })
         .collect();
+
+    let mut errors = Vec::new();
+
     for connection in connections.iter() {
         let source_port = ports.iter().find(|p| p.name == connection.0);
         let target_port = ports.iter().find(|p| p.name == connection.1);
@@ -690,10 +749,23 @@ pub fn disconnect_unwanted_jack_ports(apps: MutexGuard<'_, Vec<ManagedAudioProgr
                 if output.status.success() {
                     println!("Disconnected {} from {}", source.name, target.name);
                 } else {
-                    eprintln!("Error disconnecting {} from {}: {}", source.name, target.name, String::from_utf8_lossy(&output.stderr));
+                    let err = format!(
+                        "Error disconnecting {} from {}: {}",
+                        source.name,
+                        target.name,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    eprintln!("{}", err);
+                    errors.push(err);
                 }
             }
         }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
@@ -702,7 +774,8 @@ pub fn connect_jack_ports(
     apps: &mut Vec<ManagedAudioProgram>,
     app_index: i32,
     jack_index: i32,
-) {
+) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
     let ports = read_jack_ports();
     if app_index >= 0 && app_index < apps.len() as i32 {
         let app_index_usize = app_index as usize;
@@ -735,15 +808,35 @@ pub fn connect_jack_ports(
                         .as_ref()
                         .map(|p| p.name.split(':').next().unwrap_or(&p.name).to_string())
                         .unwrap_or_default();
-                    app.save_jack_target();
+                    let result = app.save_jack_target();
+                    if let Err(e) = result {
+                        errors.push(format!("Fehler beim Speichern des JACK-Ziels: {:?}", e));
+                    }
                 } else {
-                    eprintln!("Error connecting {} to {}: {}", source.name, target.name, String::from_utf8_lossy(&output.stderr));
+                    errors.push(format!(
+                        "Fehler beim Verbinden {} zu {}: {}",
+                        source.name,
+                        target.name,
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
                 }
             } else {
-                eprintln!("Source or target port not found: {} -> {}", port.source_name, port.target_name);
+                errors.push(format!(
+                    "Source oder Target Port nicht gefunden: {} -> {}",
+                    port.source_name, port.target_name
+                ));
             }
+        } else {
+            errors.push("Ungültiger Port-Index".to_string());
         }
-    };
+    } else {
+        errors.push("Ungültiger App-Index".to_string());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 

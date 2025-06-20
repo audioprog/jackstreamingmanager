@@ -78,66 +78,139 @@ impl ManagedAudioProgram {
         Self::config_dir().join(format!("{}/pid", program_name))
     }
 
-    pub fn save_config(&self) {
+    pub fn save_config(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
         let dir = Self::config_dir().join(&self.config.program_name);
-        fs::create_dir_all(&dir).unwrap();
-        let config_path = dir.join("config.json");
-        let file = File::create(config_path).unwrap();
-        serde_json::to_writer_pretty(file, &self.config).unwrap();
-    }
-
-    pub fn save_pid(&self) {
-        if let Some(child) = &self.process {
-            let dir = Self::config_dir().join(&self.config.program_name);
-            fs::create_dir_all(&dir).unwrap();
-            let pid_path = dir.join("pid");
-            let mut file = File::create(pid_path).unwrap();
-            write!(file, "{}", child.id()).unwrap();
+        if let Err(e) = fs::create_dir_all(&dir) {
+            errors.push(format!("Fehler beim Erstellen des Verzeichnisses: {}", e));
         }
-    }
-
-    pub fn save_jack_target(&self) {
-        let dir = Self::config_dir().join(&self.config.program_name);
-        fs::create_dir_all(&dir).unwrap();
-        let target_path = dir.join("jack_target");
-        let mut file = File::create(target_path).unwrap();
-        write!(file, "{}", self.jack_node_name).unwrap();
-    }
-
-    pub fn start(&mut self) {
-        // Prüfe, ob das Programm bereits läuft (PID-File vorhanden und Prozess existiert)
-        if self.pid_file.exists() {
-            if let Ok(pid_str) = fs::read_to_string(&self.pid_file) {
-                if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                    let mut sys = System::new();
-                    sys.refresh_processes_specifics(ProcessesToUpdate::All, true,
-                        ProcessRefreshKind::nothing().with_cmd(UpdateKind::OnlyIfNotSet).with_exe(UpdateKind::OnlyIfNotSet));
-                    if sys.process(sysinfo::Pid::from(pid as usize)).is_some() {
-                        println!("Prozess mit PID {} läuft bereits.", pid);
-                        return;
-                    }
+        let config_path = dir.join("config.json");
+        match File::create(&config_path) {
+            Ok(file) => {
+                if let Err(e) = serde_json::to_writer_pretty(file, &self.config) {
+                    errors.push(format!("Fehler beim Schreiben der Konfiguration: {}", e));
                 }
             }
+            Err(e) => errors.push(format!("Fehler beim Erstellen der Konfigurationsdatei: {}", e)),
         }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn save_pid(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if let Some(child) = &self.process {
+            let dir = Self::config_dir().join(&self.config.program_name);
+            if let Err(e) = fs::create_dir_all(&dir) {
+                errors.push(format!("Fehler beim Erstellen des Verzeichnisses: {}", e));
+            }
+            let pid_path = dir.join("pid");
+            match File::create(&pid_path) {
+                Ok(mut file) => {
+                    if let Err(e) = write!(file, "{}", child.id()) {
+                        errors.push(format!("Fehler beim Schreiben der PID: {}", e));
+                    }
+                }
+                Err(e) => errors.push(format!("Fehler beim Erstellen der PID-Datei: {}", e)),
+            }
+        } else {
+            errors.push("Kein laufender Prozess vorhanden.".to_string());
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn save_jack_target(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        let dir = Self::config_dir().join(&self.config.program_name);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            errors.push(format!("Fehler beim Erstellen des Verzeichnisses: {}", e));
+        }
+        let target_path = dir.join("jack_target");
+        match File::create(&target_path) {
+            Ok(mut file) => {
+                if let Err(e) = write!(file, "{}", self.jack_node_name) {
+                    errors.push(format!("Fehler beim Schreiben der jack_node_name: {}", e));
+                }
+            }
+            Err(e) => errors.push(format!("Fehler beim Erstellen der Datei: {}", e)),
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn start(&mut self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Prüfe, ob das Programm bereits läuft (PID-File vorhanden und Prozess existiert)
+        if self.pid_file.exists() {
+            match fs::read_to_string(&self.pid_file) {
+                Ok(pid_str) => {
+                    match pid_str.trim().parse::<u32>() {
+                        Ok(pid) => {
+                            let mut sys = System::new();
+                            sys.refresh_processes_specifics(
+                                ProcessesToUpdate::All,
+                                true,
+                                ProcessRefreshKind::nothing()
+                                    .with_cmd(UpdateKind::OnlyIfNotSet)
+                                    .with_exe(UpdateKind::OnlyIfNotSet),
+                            );
+                            if sys.process(sysinfo::Pid::from(pid as usize)).is_some() {
+                                errors.push(format!("Prozess mit PID {} läuft bereits.", pid));
+                                return Err(errors);
+                            }
+                        }
+                        Err(e) => errors.push(format!("Fehler beim Parsen der PID: {}", e)),
+                    }
+                }
+                Err(e) => errors.push(format!("Fehler beim Lesen der PID-Datei: {}", e)),
+            }
+        }
+
         let mut cmd = Command::new(&self.config.command_name);
         cmd.args(&self.config.start_params);
         let child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) => {
-            eprintln!("Fehler beim Starten des Audio-Programms: {}", e);
-            return;
+                errors.push(format!("Fehler beim Starten des Audio-Programms: {}", e));
+                return Err(errors);
             }
         };
         self.process = Some(child);
-        self.save_pid();
+        if let Err(pid_errors) = self.save_pid() {
+            errors.extend(pid_errors);
+        }
+
         // Wenn das gestartete Programm "baresip" ist, sende "D" an stdin
         if self.config.command_name == "baresip" {
             if let Some(child) = &mut self.process {
                 if let Some(stdin) = child.stdin.as_mut() {
-                    let _ = write!(stdin, "D");
-                    let _ = stdin.flush();
+                    if let Err(e) = write!(stdin, "D") {
+                        errors.push(format!("Fehler beim Schreiben an baresip stdin: {}", e));
+                    }
+                    if let Err(e) = stdin.flush() {
+                        errors.push(format!("Fehler beim Flushen von baresip stdin: {}", e));
+                    }
+                } else {
+                    errors.push("baresip stdin ist nicht verfügbar.".to_string());
                 }
             }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
         }
     }
 
