@@ -171,15 +171,14 @@ fn main() {
         let audio_programs = audio_programs.clone();
         let ui_handle = ui.as_weak();
         ui.on_start_use_case(move |use_case| {
+            let mut all_errors = Vec::new();
             let mut programs = audio_programs.lock().unwrap();
             // Collect indices to connect after mutable borrow ends
             let mut to_connect = Vec::new();
             for (app_index, prog) in programs.iter_mut().enumerate() {
                 let result = prog.start();
-                if let Some(ui) = ui_handle.upgrade() {
-                    if let Err(e) = result {
-                        ui.set_output(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
-                    }
+                if let Err(e) = result {
+                    all_errors.push(format!("Fehler beim Starten des Programms {}: {:?}", prog.config.program_name, e).into());
                 }
 
                 for (jack_index, port) in prog.config.jack_ports.iter().enumerate() {
@@ -191,7 +190,6 @@ fn main() {
             // Drop the mutable borrow before calling connect_jack_ports
             drop(programs);
             let mut programs = audio_programs.lock().unwrap();
-            let mut all_errors = Vec::new();
             for (app_index, jack_index) in &to_connect {
                 if let Err(errors) = connect_jack_ports(&mut programs, *app_index, *jack_index) {
                     all_errors.extend(errors);

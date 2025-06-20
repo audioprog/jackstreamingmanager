@@ -69,10 +69,13 @@ export component MainWindow inherits Window  {
                     }
                 }
 
-                Text {
+                ScrollView {
                     vertical-stretch: 1;
-                    text: root.output;
-                    wrap: word-wrap;
+                    Text {
+                        vertical-stretch: 1;
+                        text: root.output;
+                        wrap: word-wrap;
+                    }
                 }
 
                 Button {
@@ -127,7 +130,7 @@ export component MainWindow inherits Window  {
                             horizontal-stretch: 1;
                             clicked => { root.start_app(); }
                         }
-                        
+
                         StandardListView {
                             model: root.jack_connections;
                             current-item <=> root.Jack_connection_selected;
