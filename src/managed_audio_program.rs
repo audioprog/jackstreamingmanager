@@ -192,6 +192,9 @@ impl ManagedAudioProgram {
             errors.extend(pid_errors);
         }
 
+        // Pause für 300 ms nach dem Starten des Prozesses
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
         // Wenn das gestartete Programm "baresip" ist, sende "D" an stdin
         if self.config.command_name == "baresip" {
             if let Some(child) = &mut self.process {
