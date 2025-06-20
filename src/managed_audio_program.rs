@@ -165,7 +165,8 @@ impl ManagedAudioProgram {
                                     .with_cmd(UpdateKind::OnlyIfNotSet)
                                     .with_exe(UpdateKind::OnlyIfNotSet),
                             );
-                            if sys.process(sysinfo::Pid::from(pid as usize)).is_some() {
+                            let test = sys.process(sysinfo::Pid::from(pid as usize));
+                            if test.is_some() && test.unwrap().name().to_string_lossy().contains(&self.config.command_name) {
                                 errors.push(format!("Prozess mit PID {} läuft bereits.", pid));
                                 return Err(errors);
                             }
