@@ -390,7 +390,8 @@ fn main() {
             }
 
             if let Some(ui) = ui_handle.upgrade() {
-                let filters = get_filters(audio_programs.lock().unwrap());
+                // Filters neu berechnen, nachdem gespeichert wurde
+                let filters = get_filters(programs);
                 ui.set_use_cases(
                     ModelRc::new(VecModel::from(
                         filters.iter().map(|s| SharedString::from(s.clone())).collect::<Vec<SharedString>>()
