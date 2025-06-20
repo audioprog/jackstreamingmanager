@@ -50,7 +50,8 @@ export component MainWindow inherits Window  {
     callback remove_program();
 
     title: "Audio-Programmsteuerung";
-    icon: @image-url("icon.svg");
+
+    icon: @image-url("icon.png");
 
     TabWidget {
         vertical-stretch: 1;
@@ -69,6 +70,7 @@ export component MainWindow inherits Window  {
                 }
 
                 Text {
+                    vertical-stretch: 1;
                     text: root.output;
                     wrap: word-wrap;
                 }
@@ -138,6 +140,7 @@ export component MainWindow inherits Window  {
                             }
                         }
 
+                        // Trenner
                         Rectangle {
                             height: 1px;
                             background: #000;
@@ -221,6 +224,19 @@ export component MainWindow inherits Window  {
                                 horizontal-stretch: 1;
                                 clicked => { root.jack_connect(); }
                             }
+
+                            // Trenner
+                            Rectangle {
+                                height: 1px;
+                                background: #000;
+                                horizontal-stretch: 1;
+                            }
+
+                            Button {
+                                text: "Audiogeräte aktualisieren";
+                                horizontal-stretch: 1;
+                                clicked => { root.jack_target_reinit(); }
+                            }
                         }
                     }
                 }
@@ -235,10 +251,6 @@ export component MainWindow inherits Window  {
                     Button {
                         text: "Löschen";
                         clicked => { root.remove_program(); }
-                    }
-                    Button {
-                        text: "Audiogeräte aktualisieren";
-                        clicked => { root.jack_target_reinit(); }
                     }
                     Button {
                         text: "Speichern";

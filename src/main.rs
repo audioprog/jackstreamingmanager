@@ -11,6 +11,7 @@ use managed_audio_program::ManagedAudioProgram;
 use crate::managed_audio_program::{read_jack_connections, read_jack_ports, AudioProgramConfig, JackPort};
 use std::collections::HashSet;
 
+
 fn main() {
     // Ports beim Start einlesen
     let ports = read_jack_ports();
@@ -37,7 +38,7 @@ fn main() {
                 }
             ],
         };
-        let mut prog = ManagedAudioProgram {
+        let prog = ManagedAudioProgram {
             config,
             process: None,
             pid_file: PathBuf::new(),
@@ -48,30 +49,7 @@ fn main() {
         audio_programs.lock().unwrap().push(prog);
     }
 
-    let mut filters = {
-        let programs = audio_programs.lock().unwrap();
-        let mut all_filters = Vec::new();
-        for prog in programs.iter() {
-            for port in prog.config.jack_ports.iter() {
-                for s in port.filter.split_whitespace() {
-                    let s = s.to_string();
-                    if !s.is_empty() {
-                        all_filters.push(s);
-                    }
-                }
-            }
-        }
-        let mut seen = HashSet::new();
-        all_filters
-            .into_iter()
-            .filter(|s| seen.insert(s.clone()))
-            .collect::<Vec<String>>()
-    };
-    if filters.is_empty() {
-        // Wenn keine Filter vorhanden sind, füge einen Standardfilter hinzu
-        filters.push("start".to_string());
-    }
-
+    let filters = get_filters(audio_programs.lock().unwrap());
 
     // Alle verfügbaren JACK-Quellen auflisten (z.B. system:capture_1, baresip:input, etc.)
     let jack_sources: Vec<String> = {
@@ -150,6 +128,28 @@ fn main() {
         .unwrap_or_default()
     );
 
+    // Doppelte Filter-Einträge verhindern
+    let unique_filters: Vec<slint::SharedString> = {
+        let mut seen = std::collections::HashSet::new();
+        filters
+            .iter()
+            .filter_map(|s| {
+                if seen.insert(s) {
+                    Some(slint::SharedString::from(s.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    ui.set_jack_filters(ModelRc::new(
+        slint::VecModel::from(unique_filters)
+    ));
+    ui.set_jack_filter(audio_programs.lock().unwrap().first()
+        .and_then(|item| item.config.jack_ports.first())
+        .map(|port| port.filter.clone().into())
+        .unwrap_or_default()
+    );
     ui.set_jack_source(audio_programs.lock().unwrap().first()
         .and_then(|item| item.config.jack_ports.first())
         .map(|port| port.source_name.clone().into())
@@ -169,17 +169,25 @@ fn main() {
 
     {
         let audio_programs = audio_programs.clone();
-        let ui_handle = ui.as_weak();
         ui.on_start_use_case(move |use_case| {
             let mut programs = audio_programs.lock().unwrap();
-            for prog in programs.iter_mut() {
-
-                prog.config.jack_ports.iter_mut().for_each(|port| {
+            // Collect indices to connect after mutable borrow ends
+            let mut to_connect = Vec::new();
+            for (app_index, prog) in programs.iter_mut().enumerate() {
+                prog.start();
+                for (jack_index, port) in prog.config.jack_ports.iter().enumerate() {
                     if port.filter == use_case.to_string() {
-
+                        to_connect.push((app_index as i32, jack_index as i32));
                     }
-                });
+                }
             }
+            // Drop the mutable borrow before calling connect_jack_ports
+            drop(programs);
+            let mut programs = audio_programs.lock().unwrap();
+            for (app_index, jack_index) in to_connect {
+                connect_jack_ports(&mut programs, app_index, jack_index);
+            }
+            disconnect_unwanted_jack_ports(programs, &use_case);
         });
     }
 
@@ -187,10 +195,16 @@ fn main() {
         let audio_programs = audio_programs.clone();
         let ui_handle = ui.as_weak();
         ui.on_remove_unwanted_connections(move || {
+            if let Ok(programs) = audio_programs.lock() {
+                disconnect_unwanted_jack_ports(programs, &"");
+            }
             if let Some(ui) = ui_handle.upgrade() {
-                if let Ok(programs) = audio_programs.lock() {
-                    disconnect_unwanted_jack_ports(programs);
-                }
+                let filters = get_filters(audio_programs.lock().unwrap());
+                ui.set_use_cases(
+                    ModelRc::new(VecModel::from(
+                        filters.iter().map(|s| SharedString::from(s.clone())).collect::<Vec<SharedString>>()
+                    ))
+                );
             }
         });
     }
@@ -233,6 +247,7 @@ fn main() {
             let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
             let mut programs = audio_programs.lock().unwrap();
             if idx < programs.len() {
+                programs[idx].delete_config();
                 // Entferne das Programm
                 programs.remove(idx);
                 // Aktualisiere das Model für Slint
@@ -325,6 +340,44 @@ fn main() {
     }
 
     {
+        // Callback: Jack filter geändert
+        let audio_programs = audio_programs.clone();
+        let ui_handle = ui.as_weak();
+        ui.on_jack_filter_changed(move || {
+            let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
+            let mut programs = audio_programs.lock().unwrap();
+            if let Some(prog) = programs.get_mut(idx) {
+                if let Some(ui) = ui_handle.upgrade() {
+                    let filter = ui.get_jack_filter().to_string();
+                    // Aktualisiere den Filter für den ausgewählten Port
+                    let selected_index = ui.get_Jack_connection_selected();
+                    if let Some(port) = prog.config.jack_ports.get_mut(selected_index as usize) {
+                        port.filter = filter.clone();
+
+                        let filters = get_filters(programs);
+                        let unique_filters: Vec<slint::SharedString> = {
+                            let mut seen = std::collections::HashSet::new();
+                            filters
+                                .iter()
+                                .filter_map(|s| {
+                                    if seen.insert(s) {
+                                        Some(slint::SharedString::from(s.clone()))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect()
+                        };
+                        ui.set_jack_filters(ModelRc::new(
+                            slint::VecModel::from(unique_filters)
+                        ));
+                    }
+                }
+            }
+        });
+    }
+
+    {
         let audio_programs = audio_programs.clone();
         let ui_handle = ui.as_weak();
 
@@ -334,6 +387,15 @@ fn main() {
             let mut programs = audio_programs.lock().unwrap();
             if let Some(prog) = programs.get_mut(idx) {
                 prog.save_config();
+            }
+
+            if let Some(ui) = ui_handle.upgrade() {
+                let filters = get_filters(audio_programs.lock().unwrap());
+                ui.set_use_cases(
+                    ModelRc::new(VecModel::from(
+                        filters.iter().map(|s| SharedString::from(s.clone())).collect::<Vec<SharedString>>()
+                    ))
+                );
             }
         });
     }
@@ -347,24 +409,22 @@ fn main() {
             let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
             let mut programs = audio_programs.lock().unwrap();
             if let Some(prog) = programs.get_mut(idx) {
+                let source_name = "".to_string();
+                let target_name = "".to_string();
+                
+                prog.config.jack_ports.push(JackPort {
+                    filter: "".to_string(),
+                    source_name,
+                    target_search_name: target_name.clone(),
+                    target_name,
+                });
+                prog.save_config();
+                // Aktualisiere die Verbindungen im UI
+                let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
+                    .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
+                    .collect();
                 if let Some(ui) = ui_handle.upgrade() {
-                    let source_name = "".to_string();
-                    let target_name = "".to_string();
-                    
-                    prog.config.jack_ports.push(JackPort {
-                        filter: "".to_string(),
-                        source_name,
-                        target_search_name: target_name.clone(),
-                        target_name,
-                    });
-                    prog.save_config();
-                    // Aktualisiere die Verbindungen im UI
-                    let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
-                        .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
-                        .collect();
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
-                    }
+                    ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
                 }
             }
         });
@@ -375,14 +435,15 @@ fn main() {
         let ui_handle = ui.as_weak();
 
         // Callback: Jack-Verbindung ausgewählt
-        ui.on_jack_connection_changed(move |idx | {
+        ui.on_jack_connection_changed(move |_idx | {
             let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
-            let mut programs = audio_programs.lock().unwrap();
+            let programs = audio_programs.lock().unwrap();
             if let Some(prog) = programs.get(idx) {
                 if let Some(ui) = ui_handle.upgrade() {
                     let selected_index = ui.get_Jack_connection_selected() as usize;
                     if selected_index < prog.config.jack_ports.len() {
                         let port = &prog.config.jack_ports[selected_index];
+                        ui.set_jack_filter(port.filter.clone().into());
                         ui.set_jack_source(port.source_name.clone().into());
                         ui.set_jack_target(port.target_name.clone().into());
                         ui.set_jack_search(port.target_search_name.clone().into());
@@ -503,12 +564,10 @@ fn main() {
         let ui_handle = ui.as_weak();
         ui.on_jack_connect(move || {
             if let Some(ui) = ui_handle.upgrade() {
-                let idx = ui.get_program_selected() as usize;
-                let programs = audio_programs.lock().unwrap();
-                if let Some(prog) = programs.get(idx) {
-                    let jack_index = ui.get_jack_selected();
-                    connect_jack_ports(programs, jack_index, ui.get_Jack_connection_selected());
-                }
+                let idx = ui.get_program_selected();
+                let mut programs = audio_programs.lock().unwrap();
+                let jack_index = ui.get_jack_selected();
+                connect_jack_ports(&mut programs, jack_index, idx);
             }
         });
     }
@@ -538,19 +597,50 @@ fn main() {
         });
     }
 
-    ui.run();
+    ui.run().unwrap();
 }
 
 
-pub fn disconnect_unwanted_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>) -> () {
+fn get_filters(programs: MutexGuard<'_, Vec<ManagedAudioProgram>>) -> Vec<String> {
+    let mut filters = {
+        let programs = programs;
+        let mut all_filters = Vec::new();
+        for prog in programs.iter() {
+            for port in prog.config.jack_ports.iter() {
+                for s in port.filter.split_whitespace() {
+                    let s = s.to_string();
+                    if !s.is_empty() {
+                        all_filters.push(s);
+                    }
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        all_filters
+            .into_iter()
+            .filter(|s| seen.insert(s.clone()))
+            .collect::<Vec<String>>()
+    };
+    if filters.is_empty() {
+        // Wenn keine Filter vorhanden sind, füge einen Standardfilter hinzu
+        filters.push("start".to_string());
+    }
+    filters
+}
+
+
+pub fn disconnect_unwanted_jack_ports(apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, use_case: &str) -> () {
     let ports = read_jack_ports();
     let connections = read_jack_connections();
 
     let apps_jack_node_names: Vec<String> = apps.iter().map(|a| a.jack_node_name.clone()).collect();
 
-    let mut wanted_connections: HashSet<(String, String)> = apps.iter()
+    let wanted_connections: HashSet<(String, String)> = apps.iter()
         .flat_map(|app| {
-            app.config.jack_ports.iter().map(|port| (port.source_name.clone(), get_jack_name(&ports, &apps_jack_node_names, app.jack_node_name.clone(), port)))
+            app.config.jack_ports
+            .iter()
+            .filter(|port| port.filter.split_whitespace().any(|f| f == use_case) || port.filter.is_empty())
+            .map(|port| (port.source_name.clone(), get_jack_name(&ports, &apps_jack_node_names, app.jack_node_name.clone(), port)))
         })
         .collect();
     for connection in connections.iter() {
@@ -576,7 +666,11 @@ pub fn disconnect_unwanted_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioP
 }
 
        
-pub fn connect_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, app_index: i32, jack_index: i32) -> () {
+pub fn connect_jack_ports(
+    apps: &mut Vec<ManagedAudioProgram>,
+    app_index: i32,
+    jack_index: i32,
+) {
     let ports = read_jack_ports();
     if app_index >= 0 && app_index < apps.len() as i32 {
         let app_index_usize = app_index as usize;
@@ -587,19 +681,16 @@ pub fn connect_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, ap
         }
         // Avoid holding a mutable borrow while iterating immutably
         // First, get the port and clone the relevant data
-        let (port, app_jack_ports_len) = {
+        let port = {
             let app = apps.get(app_index_usize).unwrap();
-            (
-                app.config.jack_ports.get(jack_index as usize).cloned(),
-                app.config.jack_ports.len(),
-            )
+            app.config.jack_ports.get(jack_index as usize).cloned()
         };
         if let Some(port) = port {
             let source_port = ports.iter().find(|p| p.name == port.source_name);
             let apps_jack_node_names: Vec<String> = apps.iter().map(|a| a.jack_node_name.clone()).collect();
             let search_target = get_jack_name(&ports, &apps_jack_node_names, app_jack_node_name, &port);
             // Now get mutable app only after all immutable borrows are done
-            let mut app = apps.get_mut(app_index_usize).unwrap();
+            let app = apps.get_mut(app_index_usize).unwrap();
             let target_port = ports.iter().find(|p| p.name == search_target);
             if let (Some(source), Some(target)) = (source_port, target_port) {
                 let output = Command::new("jack_connect")

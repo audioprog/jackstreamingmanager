@@ -1,5 +1,4 @@
 use std::{fs::{self, File}, io::Write, path::PathBuf, process::{Child, Command}};
-use regex;
 
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
@@ -135,6 +134,13 @@ impl ManagedAudioProgram {
             }
         }
     }
+
+    pub fn delete_config(&self) {
+        let dir = Self::config_dir().join(&self.config.program_name);
+        if dir.exists() {
+            fs::remove_dir_all(&dir).expect("Failed to delete program config directory");
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -193,13 +199,11 @@ pub fn read_jack_connections() -> Vec<(String, String)> {
 
     let mut current_port: Option<String> = None;
     let mut last_targets: Vec<String> = Vec::new();
-    let mut last_properties: Option<Vec<String>> = None;
 
     for line in stdout.lines() {
         if !line.starts_with(' ') && !line.starts_with('\t') && !line.is_empty() {
             // New port name
             current_port = Some(line.trim().to_string());
-            last_properties = None;
         } else if let Some(port) = &current_port {
             let trimmed = line.trim();
             if trimmed.starts_with("properties:") {
@@ -209,7 +213,7 @@ pub fn read_jack_connections() -> Vec<(String, String)> {
                     .map(|s| s.trim().to_string())
                     .collect::<Vec<_>>();
                 port_properties.insert(port.clone(), props.clone());
-                last_properties = Some(props);
+                let last_properties = Some(props);
 
                 let has_output = last_properties
                     .as_ref()
