@@ -272,6 +272,22 @@ fn main() {
                     ui.set_edit_program_name(prog.config.program_name.clone().into());
                     ui.set_edit_command_name(prog.config.command_name.clone().into());
                     ui.set_edit_start_params(prog.config.start_params.join(" ").into());
+                    
+                    let jack_connections: Vec<String> = prog.config.jack_ports
+                        .iter()
+                        .map(|port| format!("{} -> {}", port.source_name, port.target_name))
+                        .collect();
+
+                    let jack_connections_items: Vec<StandardListViewItem> = jack_connections
+                        .into_iter()
+                        .map(|s| StandardListViewItem::from(SharedString::from(s)))
+                        .collect();
+                    ui.set_jack_connections(ModelRc::new(VecModel::from(jack_connections_items)));
+
+                    // Setze die Eingabefelder zurück
+                    ui.set_Jack_connection_selected(0);
+
+                    reset_jack_view(programs, ui_handle.clone());
                 }
             }
         });
@@ -426,6 +442,8 @@ fn main() {
                     .collect();
                 if let Some(ui) = ui_handle.upgrade() {
                     ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
+                    ui.set_Jack_connection_selected(prog.config.jack_ports.len() as i32 - 1);
+                    reset_jack_view(programs, ui_handle.clone());
                 }
             }
         });
@@ -436,20 +454,11 @@ fn main() {
         let ui_handle = ui.as_weak();
 
         // Callback: Jack-Verbindung ausgewählt
-        ui.on_jack_connection_changed(move |_idx | {
-            let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
-            let programs = audio_programs.lock().unwrap();
-            if let Some(prog) = programs.get(idx) {
-                if let Some(ui) = ui_handle.upgrade() {
-                    let selected_index = ui.get_Jack_connection_selected() as usize;
-                    if selected_index < prog.config.jack_ports.len() {
-                        let port = &prog.config.jack_ports[selected_index];
-                        ui.set_jack_filter(port.filter.clone().into());
-                        ui.set_jack_source(port.source_name.clone().into());
-                        ui.set_jack_target(port.target_name.clone().into());
-                        ui.set_jack_search(port.target_search_name.clone().into());
-                    }
-                }
+        ui.on_jack_connection_changed({
+            let audio_programs = audio_programs.clone();
+            move |_idx| {
+                let programs: MutexGuard<'_, Vec<ManagedAudioProgram>> = audio_programs.lock().unwrap();
+                reset_jack_view(programs, ui_handle.clone());
             }
         });
     }
@@ -474,6 +483,11 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
+
+                        // Setze die Eingabefelder zurück
+                        ui.set_Jack_connection_selected(0);
+
+                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -500,6 +514,11 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
+
+                        // Setze die Eingabefelder zurück
+                        ui.set_Jack_connection_selected(0);
+
+                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -526,6 +545,11 @@ fn main() {
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
+
+                        // Setze die Eingabefelder zurück
+                        ui.set_Jack_connection_selected(0);
+
+                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -550,11 +574,16 @@ fn main() {
                         let connections: Vec<StandardListViewItem> = prog.config.jack_ports.iter()
                             .map(|port| StandardListViewItem::from(SharedString::from(format!("{} -> {}", port.source_name, port.target_name))))
                             .collect();
-                        let connections_len = connections.len();
                         ui.set_jack_connections(ModelRc::new(VecModel::from(connections)));
 
-                        // Setze die Eingabefelder zurück
-                        ui.set_Jack_connection_selected(connections_len as i32 - 1);
+                        if selected_index > 0 {
+                            // Setze die Eingabefelder zurück
+                            ui.set_Jack_connection_selected(selected_index as i32 - 1);
+                        } else {
+                            ui.set_Jack_connection_selected(0);
+                        }
+
+                        reset_jack_view(programs, ui_handle.clone());
                     }
                 }
             }
@@ -599,6 +628,23 @@ fn main() {
     }
 
     ui.run().unwrap();
+}
+
+
+fn reset_jack_view(programs: MutexGuard<'_, Vec<ManagedAudioProgram>>, ui_handle: slint::Weak<MainWindow>) {
+    let idx = ui_handle.upgrade().map(|ui| ui.get_program_selected()).unwrap_or(0) as usize;
+    if let Some(prog) = programs.get(idx) {
+        if let Some(ui) = ui_handle.upgrade() {
+            let selected_index = ui.get_Jack_connection_selected() as usize;
+            if selected_index < prog.config.jack_ports.len() {
+                let port = &prog.config.jack_ports[selected_index];
+                ui.set_jack_filter(port.filter.clone().into());
+                ui.set_jack_source(port.source_name.clone().into());
+                ui.set_jack_target(port.target_name.clone().into());
+                ui.set_jack_search(port.target_search_name.clone().into());
+            }
+        }
+    }
 }
 
 
