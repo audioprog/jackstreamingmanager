@@ -179,3 +179,51 @@ pub fn read_jack_ports() -> Vec<JackPortInfo> {
     }
     ports
 }
+
+pub fn read_jack_connections() -> Vec<(String, String)> {
+    let output = Command::new("jack_lsp")
+        .args(["-c", "-p"])
+        .output()
+        .expect("Failed to execute jack_lsp -c -p");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    use std::collections::HashMap;
+    let mut port_properties: HashMap<String, Vec<String>> = HashMap::new();
+    let mut connections = Vec::new();
+
+    let mut current_port: Option<String> = None;
+    let mut last_targets: Vec<String> = Vec::new();
+    let mut last_properties: Option<Vec<String>> = None;
+
+    for line in stdout.lines() {
+        if !line.starts_with(' ') && !line.starts_with('\t') && !line.is_empty() {
+            // New port name
+            current_port = Some(line.trim().to_string());
+            last_properties = None;
+        } else if let Some(port) = &current_port {
+            let trimmed = line.trim();
+            if trimmed.starts_with("properties:") {
+                let props = trimmed["properties:".len()..]
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.trim().to_string())
+                    .collect::<Vec<_>>();
+                port_properties.insert(port.clone(), props.clone());
+                last_properties = Some(props);
+
+                let has_output = last_properties
+                    .as_ref()
+                    .map_or(false, |props| props.iter().any(|p| p == "output"));
+                if has_output {
+                    for target in last_targets.drain(..) {
+                        connections.push((port.clone(), target));
+                    }
+                }
+                last_targets.clear();
+            } else if !trimmed.is_empty() {
+                last_targets.push(trimmed.to_string());
+            }
+        }
+    }
+    connections
+}

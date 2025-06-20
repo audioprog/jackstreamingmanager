@@ -4,6 +4,7 @@ export component MainWindow inherits Window  {
     in property <[string]> use_cases;
     callback start_use_case(string);
     in-out property <string> output;
+    callback remove_unwanted_connections();
 
     in-out property <[string]> jack_sources;
     in-out property <int> jack_selected;
@@ -49,6 +50,7 @@ export component MainWindow inherits Window  {
     callback remove_program();
 
     title: "Audio-Programmsteuerung";
+    icon: @image-url("icon.svg");
 
     TabWidget {
         vertical-stretch: 1;
@@ -69,6 +71,15 @@ export component MainWindow inherits Window  {
                 Text {
                     text: root.output;
                     wrap: word-wrap;
+                }
+
+                Button {
+                    text: "Entferne unerwünschte Verbindungen";
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.output = "Entferne unerwünschte Verbindungen";
+                        root.remove_unwanted_connections();
+                    }
                 }
             }
         }

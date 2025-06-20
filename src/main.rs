@@ -8,7 +8,7 @@ mod managed_audio_program;
 
 use managed_audio_program::ManagedAudioProgram;
 
-use crate::managed_audio_program::{read_jack_ports, AudioProgramConfig, JackPort};
+use crate::managed_audio_program::{read_jack_connections, read_jack_ports, AudioProgramConfig, JackPort};
 use std::collections::HashSet;
 
 fn main() {
@@ -179,6 +179,18 @@ fn main() {
 
                     }
                 });
+            }
+        });
+    }
+
+    {
+        let audio_programs = audio_programs.clone();
+        let ui_handle = ui.as_weak();
+        ui.on_remove_unwanted_connections(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                if let Ok(programs) = audio_programs.lock() {
+                    disconnect_unwanted_jack_ports(programs);
+                }
             }
         });
     }
@@ -529,6 +541,40 @@ fn main() {
     ui.run();
 }
 
+
+pub fn disconnect_unwanted_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>) -> () {
+    let ports = read_jack_ports();
+    let connections = read_jack_connections();
+
+    let apps_jack_node_names: Vec<String> = apps.iter().map(|a| a.jack_node_name.clone()).collect();
+
+    let mut wanted_connections: HashSet<(String, String)> = apps.iter()
+        .flat_map(|app| {
+            app.config.jack_ports.iter().map(|port| (port.source_name.clone(), get_jack_name(&ports, &apps_jack_node_names, app.jack_node_name.clone(), port)))
+        })
+        .collect();
+    for connection in connections.iter() {
+        let source_port = ports.iter().find(|p| p.name == connection.0);
+        let target_port = ports.iter().find(|p| p.name == connection.1);
+        if let (Some(source), Some(target)) = (source_port, target_port) {
+            // Überprüfen, ob die Verbindung unerwünscht ist
+            if !wanted_connections.contains(&(connection.0.clone(), connection.1.clone())) {
+                // Verbindung trennen
+                let output = Command::new("jack_disconnect")
+                    .arg(&source.name)
+                    .arg(&target.name)
+                    .output()
+                    .expect("Failed to disconnect JACK ports");
+                if output.status.success() {
+                    println!("Disconnected {} from {}", source.name, target.name);
+                } else {
+                    eprintln!("Error disconnecting {} from {}: {}", source.name, target.name, String::from_utf8_lossy(&output.stderr));
+                }
+            }
+        }
+    }
+}
+
        
 pub fn connect_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, app_index: i32, jack_index: i32) -> () {
     let ports = read_jack_ports();
@@ -551,35 +597,7 @@ pub fn connect_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, ap
         if let Some(port) = port {
             let source_port = ports.iter().find(|p| p.name == port.source_name);
             let apps_jack_node_names: Vec<String> = apps.iter().map(|a| a.jack_node_name.clone()).collect();
-            let search_target = if !app_jack_node_name.is_empty() {
-                app_jack_node_name.clone() + ":" + if port.target_name.contains(':') {
-                    &port.target_name.split(':').next().unwrap_or(&port.target_name)
-                } else {
-                    &port.target_name
-                }
-            } else if port.target_name.contains('*') {
-                let matching_targets = ports.iter().filter(|p| {
-                    let pattern = port.target_name.clone();
-                    let re = regex::Regex::new(&format!("^{}$", pattern)).unwrap();
-                    re.is_match(&p.name)
-                }).collect::<Vec<_>>();
-                if !matching_targets.is_empty() {
-                    let mut first_matching_target = matching_targets.first().unwrap();
-                    for matching_target in &matching_targets {
-                        // Use the collected jack_node_names instead of borrowing apps again
-                        if apps_jack_node_names.iter().any(|name| name == &matching_target.name) {
-                            continue;
-                        }
-                        first_matching_target = matching_target;
-                        break; // Nur das erste passende Ziel verbinden
-                    }
-                    first_matching_target.name.clone()
-                } else {
-                    port.target_name.clone()
-                }
-            } else {
-                port.target_name.clone()
-            };
+            let search_target = get_jack_name(&ports, &apps_jack_node_names, app_jack_node_name, &port);
             // Now get mutable app only after all immutable borrows are done
             let mut app = apps.get_mut(app_index_usize).unwrap();
             let target_port = ports.iter().find(|p| p.name == search_target);
@@ -589,18 +607,52 @@ pub fn connect_jack_ports(mut apps: MutexGuard<'_, Vec<ManagedAudioProgram>>, ap
                     .arg(&target.name)
                     .output()
                     .expect("Failed to connect JACK ports");
-                if !output.status.success() {
-                    eprintln!("Error connecting {} to {}: {}", source.name, target.name, String::from_utf8_lossy(&output.stderr));
-                } else {
+                if output.status.success() {
                     app.jack_node_name = target_port
                         .as_ref()
                         .map(|p| p.name.split(':').next().unwrap_or(&p.name).to_string())
                         .unwrap_or_default();
                     app.save_jack_target();
+                } else {
+                    eprintln!("Error connecting {} to {}: {}", source.name, target.name, String::from_utf8_lossy(&output.stderr));
                 }
             } else {
                 eprintln!("Source or target port not found: {} -> {}", port.source_name, port.target_name);
             }
         }
     };
+}
+
+
+fn get_jack_name(ports: &Vec<managed_audio_program::JackPortInfo>, apps_jack_node_names: &Vec<String>, app_jack_node_name: String, port: &JackPort) -> String {
+    let search_target = if !app_jack_node_name.is_empty() {
+        app_jack_node_name.clone() + ":" + if port.target_name.contains(':') {
+            &port.target_name.split(':').last().unwrap_or(&port.target_name)
+        } else {
+            &port.target_name
+        }
+    } else if port.target_name.contains('*') {
+        let matching_targets = ports.iter().filter(|p| {
+            let pattern = port.target_name.clone();
+            let re = regex::Regex::new(&format!("^{}$", pattern)).unwrap();
+            re.is_match(&p.name)
+        }).collect::<Vec<_>>();
+        if !matching_targets.is_empty() {
+            let mut first_matching_target = matching_targets.first().unwrap();
+            for matching_target in &matching_targets {
+                // Use the collected jack_node_names instead of borrowing apps again
+                if apps_jack_node_names.iter().any(|name| name == &matching_target.name) {
+                    continue;
+                }
+                first_matching_target = matching_target;
+                break; // Nur das erste passende Ziel verbinden
+            }
+            first_matching_target.name.clone()
+        } else {
+            port.target_name.clone()
+        }
+    } else {
+        port.target_name.clone()
+    };
+    search_target
 }
