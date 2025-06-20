@@ -127,10 +127,12 @@ export component MainWindow inherits Window  {
                             horizontal-stretch: 1;
                             clicked => { root.start_app(); }
                         }
-                        StandardListView {
-                            model: root.jack_connections;
-                            current-item <=> root.Jack_connection_selected;
-                            current-item-changed => { root.jack_connection_changed(self.current-item); }
+                        HorizontalBox {
+                            StandardListView {
+                                model: root.jack_connections;
+                                current-item <=> root.Jack_connection_selected;
+                                current-item-changed => { root.jack_connection_changed(self.current-item); }
+                            }
                         }
 
                         HorizontalBox {
