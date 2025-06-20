@@ -121,7 +121,13 @@ impl ManagedAudioProgram {
         }
         let mut cmd = Command::new(&self.config.command_name);
         cmd.args(&self.config.start_params);
-        let child = cmd.spawn().expect("Failed to start audio program");
+        let child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+            eprintln!("Fehler beim Starten des Audio-Programms: {}", e);
+            return;
+            }
+        };
         self.process = Some(child);
         self.save_pid();
         // Wenn das gestartete Programm "baresip" ist, sende "D" an stdin
